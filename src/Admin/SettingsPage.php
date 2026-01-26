@@ -24,7 +24,13 @@ class SettingsPage {
 	 */
 	public static function render(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
-			return;
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'my-plugin' ) );
+		}
+
+		// Add frame-busting headers to prevent clickjacking.
+		if ( ! headers_sent() ) {
+			header( 'X-Frame-Options: SAMEORIGIN' );
+			header( 'Content-Security-Policy: frame-ancestors \'self\'' );
 		}
 
 		$settings = get_option( 'my_plugin_settings', array() );

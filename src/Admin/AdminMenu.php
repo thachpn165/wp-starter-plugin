@@ -17,6 +17,16 @@ use ThachPN165\MyPlugin\Interfaces\HookableInterface;
 class AdminMenu implements HookableInterface {
 
 	/**
+	 * Rate limit: max saves per minute.
+	 */
+	private const RATE_LIMIT_MAX = 10;
+
+	/**
+	 * Rate limit window in seconds.
+	 */
+	private const RATE_LIMIT_WINDOW = 60;
+
+	/**
 	 * Register hooks.
 	 */
 	public function register_hooks(): void {
@@ -59,8 +69,20 @@ class AdminMenu implements HookableInterface {
 	 * Handle AJAX settings save.
 	 */
 	public function ajax_save_settings(): void {
-		// Verify nonce.
-		if ( ! check_ajax_referer( 'my_plugin_save_settings', 'my_plugin_nonce', false ) ) {
+		// Rate limiting - prevent spam/DoS.
+		$user_id   = get_current_user_id();
+		$rate_key  = 'my_plugin_rate_' . $user_id;
+		$save_count = get_transient( $rate_key );
+
+		if ( false !== $save_count && (int) $save_count >= self::RATE_LIMIT_MAX ) {
+			wp_send_json_error(
+				array( 'message' => __( 'Too many requests. Please try again later.', 'my-plugin' ) ),
+				429
+			);
+		}
+
+		// Verify nonce with strict equality check.
+		if ( false === check_ajax_referer( 'my_plugin_save_settings', 'my_plugin_nonce', false ) ) {
 			wp_send_json_error(
 				array( 'message' => __( 'Security check failed.', 'my-plugin' ) ),
 				403
@@ -74,6 +96,9 @@ class AdminMenu implements HookableInterface {
 				403
 			);
 		}
+
+		// Increment rate limit counter.
+		set_transient( $rate_key, ( $save_count ? (int) $save_count + 1 : 1 ), self::RATE_LIMIT_WINDOW );
 
 		// Get and sanitize form data.
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce verified above.
@@ -97,16 +122,17 @@ class AdminMenu implements HookableInterface {
 		$updated = update_option( 'my_plugin_settings', $sanitized );
 
 		if ( false === $updated ) {
-			// Check if the settings are the same (no change needed).
-			$current = get_option( 'my_plugin_settings', array() );
-			if ( $current === $sanitized ) {
+			// Check if genuinely unchanged (use strict comparison).
+			$current = get_option( 'my_plugin_settings' );
+
+			if ( false !== $current && $current === $sanitized ) {
 				wp_send_json_success(
-					array( 'message' => __( 'Settings saved.', 'my-plugin' ) )
+					array( 'message' => __( 'No changes detected.', 'my-plugin' ) )
 				);
 			}
 
 			wp_send_json_error(
-				array( 'message' => __( 'Failed to save settings.', 'my-plugin' ) ),
+				array( 'message' => __( 'Failed to save settings. Please try again.', 'my-plugin' ) ),
 				500
 			);
 		}
@@ -130,22 +156,95 @@ class AdminMenu implements HookableInterface {
 		$sanitized['plugin_mode']    = in_array( $input['plugin_mode'] ?? '', array( 'basic', 'advanced', 'pro' ), true )
 			? $input['plugin_mode']
 			: 'basic';
-		$sanitized['cache_duration'] = absint( $input['cache_duration'] ?? 3600 );
+
+		// Cache duration: enforce 0-86400 range (0-24h).
+		$cache_duration = absint( $input['cache_duration'] ?? 3600 );
+		$sanitized['cache_duration'] = max( 0, min( $cache_duration, 86400 ) );
 
 		// Advanced settings.
-		// SECURITY: Encrypt API key before storing in database.
-		// For production: always use encryption for sensitive credentials.
 		$api_key = sanitize_text_field( $input['api_key'] ?? '' );
 		$sanitized['api_key'] = ! empty( $api_key ) ? self::encrypt_api_key( $api_key ) : '';
 		$sanitized['debug_mode'] = ! empty( $input['debug_mode'] ) ? 1 : 0;
-		$sanitized['custom_css'] = wp_strip_all_tags( $input['custom_css'] ?? '' );
 
-		// Integrations settings.
+		// Custom CSS with dangerous pattern blocking.
+		$sanitized['custom_css'] = $this->sanitize_custom_css( $input['custom_css'] ?? '' );
+
+		// Integrations settings with SSRF protection.
 		$sanitized['enable_analytics']    = ! empty( $input['enable_analytics'] ) ? 1 : 0;
-		$sanitized['third_party_api_url'] = esc_url_raw( $input['third_party_api_url'] ?? '' );
-		$sanitized['webhook_url']         = esc_url_raw( $input['webhook_url'] ?? '' );
+		$sanitized['third_party_api_url'] = $this->sanitize_url_field( $input['third_party_api_url'] ?? '' );
+		$sanitized['webhook_url']         = $this->sanitize_url_field( $input['webhook_url'] ?? '' );
 
 		return $sanitized;
+	}
+
+	/**
+	 * Sanitize custom CSS field - block dangerous patterns.
+	 *
+	 * @param string $css Raw CSS input.
+	 * @return string Sanitized CSS.
+	 */
+	private function sanitize_custom_css( string $css ): string {
+		$css = wp_strip_all_tags( $css );
+
+		if ( empty( $css ) ) {
+			return '';
+		}
+
+		// Block dangerous CSS patterns.
+		$dangerous_patterns = array(
+			'/(@import|expression|behavior|javascript:|data:(?!image))/i',
+			'/(document\.|window\.|eval\()/i',
+			'/url\s*\(\s*["\']?\s*(?!data:image)/i',
+		);
+
+		foreach ( $dangerous_patterns as $pattern ) {
+			if ( preg_match( $pattern, $css ) ) {
+				return ''; // Clear if dangerous patterns detected.
+			}
+		}
+
+		return $css;
+	}
+
+	/**
+	 * Sanitize URL field with SSRF protection.
+	 *
+	 * @param string $url Raw URL input.
+	 * @return string Sanitized URL or empty if invalid/blocked.
+	 */
+	private function sanitize_url_field( string $url ): string {
+		$url = esc_url_raw( $url );
+
+		if ( empty( $url ) ) {
+			return '';
+		}
+
+		$parsed = wp_parse_url( $url );
+
+		if ( ! $parsed || ! isset( $parsed['scheme'], $parsed['host'] ) ) {
+			return '';
+		}
+
+		// Only allow http/https.
+		if ( ! in_array( $parsed['scheme'], array( 'http', 'https' ), true ) ) {
+			return '';
+		}
+
+		// Block private/internal IPs (SSRF protection).
+		$host = $parsed['host'];
+
+		$blocked_patterns = array(
+			'/^(localhost|127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.)/i',
+			'/^(0\.0\.0\.0|::1|fc00::|fe80::)/i',
+		);
+
+		foreach ( $blocked_patterns as $pattern ) {
+			if ( preg_match( $pattern, $host ) ) {
+				return '';
+			}
+		}
+
+		return $url;
 	}
 
 	/**
@@ -168,40 +267,50 @@ class AdminMenu implements HookableInterface {
 	}
 
 	/**
-	 * Encrypt API key before storing.
-	 *
-	 * SECURITY BEST PRACTICE: Always encrypt sensitive data like API keys.
-	 * Uses WordPress AUTH_KEY as encryption key (defined in wp-config.php).
+	 * Encrypt API key with HMAC authentication.
 	 *
 	 * @param string $key Plain text API key.
-	 * @return string Encrypted API key (base64 encoded).
+	 * @return string Encrypted API key (base64 encoded with HMAC).
 	 */
 	public static function encrypt_api_key( string $key ): string {
 		if ( empty( $key ) ) {
 			return '';
 		}
 
-		// Use AUTH_KEY from wp-config.php as encryption key.
-		if ( ! defined( 'AUTH_KEY' ) || AUTH_KEY === 'put your unique phrase here' ) {
-			// Fallback: base64 encode if AUTH_KEY not properly configured.
-			return base64_encode( $key ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		// Validate AUTH_KEY is properly configured.
+		if ( ! self::is_auth_key_valid() ) {
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+			return base64_encode( $key );
 		}
 
 		$method    = 'AES-256-CBC';
 		$iv_length = openssl_cipher_iv_length( $method );
-		$iv        = openssl_random_pseudo_bytes( $iv_length );
+
+		if ( false === $iv_length ) {
+			return '';
+		}
+
+		$iv = openssl_random_pseudo_bytes( $iv_length, $crypto_strong );
+
+		if ( false === $iv || ! $crypto_strong ) {
+			return '';
+		}
+
 		$encrypted = openssl_encrypt( $key, $method, AUTH_KEY, 0, $iv );
 
-		// Combine IV + encrypted data and base64 encode.
-		return base64_encode( $iv . $encrypted ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		if ( false === $encrypted ) {
+			return '';
+		}
+
+		// Add HMAC for authenticated encryption.
+		$hmac = hash_hmac( 'sha256', $encrypted, AUTH_KEY, true );
+
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		return base64_encode( $iv . $hmac . $encrypted );
 	}
 
 	/**
-	 * Decrypt API key when retrieving.
-	 *
-	 * Usage example in your code:
-	 * $settings = get_option( 'my_plugin_settings' );
-	 * $api_key = AdminMenu::decrypt_api_key( $settings['api_key'] ?? '' );
+	 * Decrypt API key with HMAC verification.
 	 *
 	 * @param string $encrypted Encrypted API key.
 	 * @return string Decrypted plain text API key.
@@ -211,19 +320,52 @@ class AdminMenu implements HookableInterface {
 			return '';
 		}
 
-		// Fallback for non-encrypted (base64 only) keys.
-		if ( ! defined( 'AUTH_KEY' ) || AUTH_KEY === 'put your unique phrase here' ) {
-			return base64_decode( $encrypted ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+		$data = base64_decode( $encrypted, true );
+
+		if ( false === $data ) {
+			return '';
 		}
 
-		$data      = base64_decode( $encrypted ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
-		$method    = 'AES-256-CBC';
-		$iv_length = openssl_cipher_iv_length( $method );
-		$iv        = substr( $data, 0, $iv_length );
-		$encrypted = substr( $data, $iv_length );
+		// Fallback for non-encrypted (base64 only) keys.
+		if ( ! self::is_auth_key_valid() ) {
+			return $data;
+		}
 
-		$decrypted = openssl_decrypt( $encrypted, $method, AUTH_KEY, 0, $iv );
+		$method      = 'AES-256-CBC';
+		$iv_length   = openssl_cipher_iv_length( $method );
+		$hmac_length = 32; // SHA256 = 32 bytes.
+
+		// Validate data length.
+		if ( strlen( $data ) < $iv_length + $hmac_length ) {
+			return '';
+		}
+
+		// Extract components.
+		$iv         = substr( $data, 0, $iv_length );
+		$hmac       = substr( $data, $iv_length, $hmac_length );
+		$ciphertext = substr( $data, $iv_length + $hmac_length );
+
+		// Verify HMAC (constant-time comparison).
+		$expected_hmac = hash_hmac( 'sha256', $ciphertext, AUTH_KEY, true );
+
+		if ( ! hash_equals( $expected_hmac, $hmac ) ) {
+			return ''; // Tampering detected.
+		}
+
+		$decrypted = openssl_decrypt( $ciphertext, $method, AUTH_KEY, 0, $iv );
 
 		return false !== $decrypted ? $decrypted : '';
+	}
+
+	/**
+	 * Check if AUTH_KEY is properly configured.
+	 *
+	 * @return bool True if valid, false otherwise.
+	 */
+	private static function is_auth_key_valid(): bool {
+		return defined( 'AUTH_KEY' )
+			&& AUTH_KEY !== 'put your unique phrase here'
+			&& strlen( AUTH_KEY ) >= 32;
 	}
 }
