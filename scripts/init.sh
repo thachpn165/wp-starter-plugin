@@ -77,11 +77,13 @@ PLUGIN_SLUG_UPPER=$(echo "$PLUGIN_SLUG_UNDERSCORE" | tr '[:lower:]' '[:upper:]')
 
 echo ""
 echo -e "${YELLOW}Will replace:${NC}"
-echo "  my-plugin      → $PLUGIN_SLUG"
-echo "  my_plugin      → $PLUGIN_SLUG_UNDERSCORE"
-echo "  MY_PLUGIN      → $PLUGIN_SLUG_UPPER"
-echo "  MyPlugin       → $NAMESPACE"
-echo "  My Plugin      → $PLUGIN_NAME"
+echo "  My Plugin                  → $PLUGIN_NAME"
+echo "  my-plugin                  → $PLUGIN_SLUG"
+echo "  my_plugin                  → $PLUGIN_SLUG_UNDERSCORE"
+echo "  MY_PLUGIN                  → $PLUGIN_SLUG_UPPER"
+echo "  MyPlugin                   → $NAMESPACE"
+echo "  ThachPN165\\MyPlugin        → ThachPN165\\$NAMESPACE"
+echo "  ThachPN165\\\\MyPlugin      → ThachPN165\\\\$NAMESPACE"
 echo ""
 
 read -p "Continue? (y/n): " CONFIRM
@@ -98,9 +100,15 @@ replace_in_files() {
     local search=$1
     local replace=$2
 
+    # Escape special characters for sed
+    local search_escaped=$(echo "$search" | sed 's/[\/&]/\\&/g')
+    local replace_escaped=$(echo "$replace" | sed 's/[\/&]/\\&/g')
+
+    echo "  Replacing '$search' with '$replace'..."
+
     # macOS and Linux compatible sed
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        find . -type f \( -name "*.php" -o -name "*.json" -o -name "*.xml" -o -name "*.txt" -o -name "*.md" -o -name "*.js" -o -name "*.scss" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" \) \
+        find . -type f \( -name "*.php" -o -name "*.json" -o -name "*.xml" -o -name "*.txt" -o -name "*.md" -o -name "*.js" -o -name "*.css" -o -name "*.scss" -o -name "*.map" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" \) \
             -not -path "./vendor/*" \
             -not -path "./node_modules/*" \
             -not -path "./.git/*" \
@@ -108,9 +116,9 @@ replace_in_files() {
             -not -path "./svn/*" \
             -not -path "./.claude/*" \
             -not -path "./.opencode/*" \
-            -exec sed -i '' "s/${search}/${replace}/g" {} \;
+            -exec sed -i '' "s/${search_escaped}/${replace_escaped}/g" {} \;
     else
-        find . -type f \( -name "*.php" -o -name "*.json" -o -name "*.xml" -o -name "*.txt" -o -name "*.md" -o -name "*.js" -o -name "*.scss" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" \) \
+        find . -type f \( -name "*.php" -o -name "*.json" -o -name "*.xml" -o -name "*.txt" -o -name "*.md" -o -name "*.js" -o -name "*.css" -o -name "*.scss" -o -name "*.map" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" \) \
             -not -path "./vendor/*" \
             -not -path "./node_modules/*" \
             -not -path "./.git/*" \
@@ -118,27 +126,34 @@ replace_in_files() {
             -not -path "./svn/*" \
             -not -path "./.claude/*" \
             -not -path "./.opencode/*" \
-            -exec sed -i "s/${search}/${replace}/g" {} \;
+            -exec sed -i "s/${search_escaped}/${replace_escaped}/g" {} \;
     fi
 }
 
 # Perform replacements (order matters!)
 echo "Replacing strings..."
 
-# Replace underscored version first (more specific)
+# Replace display name FIRST (most specific with space)
+replace_in_files "My Plugin" "$PLUGIN_NAME"
+
+# Replace namespace patterns (do BEFORE simple replacements to avoid conflicts)
+# Handle double-escaped namespace in JSON/composer.json
+replace_in_files "ThachPN165\\\\\\\\MyPlugin" "ThachPN165\\\\\\\\$NAMESPACE"
+
+# Handle single-escaped namespace in PHP files
+replace_in_files "ThachPN165\\\\MyPlugin" "ThachPN165\\\\$NAMESPACE"
+
+# Replace standalone namespace class name
+replace_in_files "MyPlugin" "$NAMESPACE"
+
+# Replace underscored version
 replace_in_files "my_plugin" "$PLUGIN_SLUG_UNDERSCORE"
 
 # Replace uppercase version
 replace_in_files "MY_PLUGIN" "$PLUGIN_SLUG_UPPER"
 
-# Replace hyphenated version
+# Replace hyphenated version (do this AFTER uppercase to avoid conflicts)
 replace_in_files "my-plugin" "$PLUGIN_SLUG"
-
-# Replace namespace
-replace_in_files "MyPlugin" "$NAMESPACE"
-
-# Replace display name
-replace_in_files "My Plugin" "$PLUGIN_NAME"
 
 # Rename main plugin file
 if [ -f "my-plugin.php" ]; then
