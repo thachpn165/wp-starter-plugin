@@ -78,13 +78,13 @@ class AdminMenu implements HookableInterface {
 		// Get and sanitize form data.
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce verified above.
 		$input = array(
-			'enable_feature'      => isset( $_POST['enable_feature'] ) ? 1 : 0,
+			'enable_feature'      => ! empty( $_POST['enable_feature'] ) ? 1 : 0,
 			'plugin_mode'         => sanitize_text_field( wp_unslash( $_POST['plugin_mode'] ?? 'basic' ) ),
 			'cache_duration'      => absint( $_POST['cache_duration'] ?? 3600 ),
 			'api_key'             => sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) ),
-			'debug_mode'          => isset( $_POST['debug_mode'] ) ? 1 : 0,
+			'debug_mode'          => ! empty( $_POST['debug_mode'] ) ? 1 : 0,
 			'custom_css'          => wp_strip_all_tags( wp_unslash( $_POST['custom_css'] ?? '' ) ),
-			'enable_analytics'    => isset( $_POST['enable_analytics'] ) ? 1 : 0,
+			'enable_analytics'    => ! empty( $_POST['enable_analytics'] ) ? 1 : 0,
 			'third_party_api_url' => esc_url_raw( wp_unslash( $_POST['third_party_api_url'] ?? '' ) ),
 			'webhook_url'         => esc_url_raw( wp_unslash( $_POST['webhook_url'] ?? '' ) ),
 		);
@@ -126,7 +126,7 @@ class AdminMenu implements HookableInterface {
 		$sanitized = array();
 
 		// General settings.
-		$sanitized['enable_feature'] = isset( $input['enable_feature'] ) ? 1 : 0;
+		$sanitized['enable_feature'] = ! empty( $input['enable_feature'] ) ? 1 : 0;
 		$sanitized['plugin_mode']    = in_array( $input['plugin_mode'] ?? '', array( 'basic', 'advanced', 'pro' ), true )
 			? $input['plugin_mode']
 			: 'basic';
@@ -137,11 +137,11 @@ class AdminMenu implements HookableInterface {
 		// For production: always use encryption for sensitive credentials.
 		$api_key = sanitize_text_field( $input['api_key'] ?? '' );
 		$sanitized['api_key'] = ! empty( $api_key ) ? self::encrypt_api_key( $api_key ) : '';
-		$sanitized['debug_mode'] = isset( $input['debug_mode'] ) ? 1 : 0;
+		$sanitized['debug_mode'] = ! empty( $input['debug_mode'] ) ? 1 : 0;
 		$sanitized['custom_css'] = wp_strip_all_tags( $input['custom_css'] ?? '' );
 
 		// Integrations settings.
-		$sanitized['enable_analytics']    = isset( $input['enable_analytics'] ) ? 1 : 0;
+		$sanitized['enable_analytics']    = ! empty( $input['enable_analytics'] ) ? 1 : 0;
 		$sanitized['third_party_api_url'] = esc_url_raw( $input['third_party_api_url'] ?? '' );
 		$sanitized['webhook_url']         = esc_url_raw( $input['webhook_url'] ?? '' );
 

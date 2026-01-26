@@ -31,6 +31,7 @@ class IntegrationsTab {
 						<label for="enable_analytics"><?php esc_html_e( 'Enable Analytics', 'my-plugin' ); ?></label>
 					</th>
 					<td>
+						<input type="hidden" name="enable_analytics" value="0" />
 						<label class="my-plugin-toggle">
 							<input type="checkbox" id="enable_analytics" name="enable_analytics" value="1"
 								<?php checked( 1, $settings['enable_analytics'] ?? 0 ); ?> />

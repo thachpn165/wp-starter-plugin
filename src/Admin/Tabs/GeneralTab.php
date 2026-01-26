@@ -31,6 +31,7 @@ class GeneralTab {
 						<label for="enable_feature"><?php esc_html_e( 'Enable Feature', 'my-plugin' ); ?></label>
 					</th>
 					<td>
+						<input type="hidden" name="enable_feature" value="0" />
 						<label class="my-plugin-toggle">
 							<input type="checkbox" id="enable_feature" name="enable_feature" value="1"
 								<?php checked( 1, $settings['enable_feature'] ?? 0 ); ?> />

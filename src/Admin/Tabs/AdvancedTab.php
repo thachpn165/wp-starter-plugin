@@ -48,6 +48,7 @@ class AdvancedTab {
 						<label for="debug_mode"><?php esc_html_e( 'Debug Mode', 'my-plugin' ); ?></label>
 					</th>
 					<td>
+						<input type="hidden" name="debug_mode" value="0" />
 						<label class="my-plugin-toggle">
 							<input type="checkbox" id="debug_mode" name="debug_mode" value="1"
 								<?php checked( 1, $settings['debug_mode'] ?? 0 ); ?> />
