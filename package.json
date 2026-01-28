@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "vite build --watch",
+    "dev:sync": "./scripts/dev-sync.sh",
+    "dev:docker": "npm run build && ./scripts/dev-sync.sh",
     "build": "vite build",
     "preview": "vite preview"
   },

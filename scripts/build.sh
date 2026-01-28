@@ -211,6 +211,17 @@ cmd_version() {
     log_info "Version bumped to $new_version"
 }
 
+# Dev mode - build and watch for changes
+cmd_dev() {
+    log_info "Starting development mode..."
+
+    # Build first
+    cmd_build
+
+    # Start sync watcher
+    ./scripts/dev-sync.sh
+}
+
 # Show help
 cmd_help() {
     echo ""
@@ -220,6 +231,7 @@ cmd_help() {
     echo ""
     echo "Commands:"
     echo "  build       Build plugin to dist/"
+    echo "  dev         Build and watch for changes (for Docker dev)"
     echo "  zip         Create .zip archive"
     echo "  deploy-svn  Deploy to svn/ directory"
     echo "  clean       Remove dist/, svn/, *.zip"
@@ -229,6 +241,7 @@ cmd_help() {
     echo ""
     echo "Examples:"
     echo "  ./scripts/build.sh build"
+    echo "  ./scripts/build.sh dev"
     echo "  ./scripts/build.sh zip"
     echo "  ./scripts/build.sh version 1.2.0"
     echo ""
@@ -241,6 +254,9 @@ cmd_help() {
 case "$1" in
     build)
         cmd_build
+        ;;
+    dev)
+        cmd_dev
         ;;
     zip)
         cmd_zip
